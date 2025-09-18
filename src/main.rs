@@ -203,6 +203,7 @@ fn transcode_with_progress(select_type: i32, input_path: &str, output_path: &Pat
             .arg("22")
             .arg("-qp_p")
             .arg("22")
+            .arg("-y") // 覆盖输出文件
             .arg(&output_path)
             .stderr(Stdio::piped())
             .stdout(Stdio::null())
@@ -222,6 +223,7 @@ fn transcode_with_progress(select_type: i32, input_path: &str, output_path: &Pat
             .arg("28")
             .arg("-preset")
             .arg("5")
+            .arg("-y") // 覆盖输出文件
             .arg(&output_path)
             .stderr(Stdio::piped())
             .stdout(Stdio::null())
