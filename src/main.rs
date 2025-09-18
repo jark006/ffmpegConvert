@@ -11,7 +11,7 @@ fn main() {
     if args.is_empty() {
         eprintln!(concat!(
             "请提供至少一个文件或文件夹路径作为参数\n\n",
-            "本软件用于给视频批量转到H265/AV1编码格式，请把视频文件或文件夹拖到本软件图标上即可，支持拖拽多个\n\n",
+            "本软件用于给视频批量转到H265/AV1编码格式，请把视频文件或文件夹拖到本软件图标上即可，支持多个一起拖拽\n\n",
             "本软件依赖 ffmpeg，需确保 ffmpeg.exe 已安装并添加到系统环境变量中\n\n",
             "ffmpeg.exe 下载地址: https://www.gyan.dev/ffmpeg/builds/\n\n"
         ));
@@ -21,12 +21,12 @@ fn main() {
 
     println!(
         "选择要转码的目标编码类型:
-1. H265 (libx265)  CPU编码, 较慢
-2. H265 (hevc_amf) AMD GPU硬件加速编码, 速度快
+1. H265 (libx265)   CPU编码, 较慢
+2. H265 (hevc_amf)  AMD GPU硬件加速编码, 速度快
 3. AV1  (libsvtav1) CPU编码, 非常慢
 
 输入1或2或3则对应以上转码目标，转码完成则正常退出程序。
-如果输入11或22或33则对应以上转码目标，但转码完成后将自动关机 (120秒后关机)。\n"
+如果输入11或22或33则对应以上转码目标，但转码完成后将自动关机 (30秒后关机)。\n"
     );
 
     let mut select_type = 0;
@@ -64,7 +64,7 @@ fn main() {
     }
 
     if shutdown_when_done {
-        println!("提示: 转码完成将自动关机(120秒后关机)\n");
+        println!("提示: 转码完成后，将倒计时30秒关机。\n");
     }
 
     let video_exts = [
@@ -155,11 +155,11 @@ fn main() {
     }
 
     if shutdown_when_done {
-        // shutdown.exe -s -t 120
+        // shutdown.exe -s -t 30
         Command::new("shutdown.exe")
         .arg("-s")
         .arg("-t")
-        .arg("120")
+        .arg("30")
         .spawn()
         .expect("无法计划关机");
     }
