@@ -1,0 +1,11 @@
+[package]
+name = "ffmpegConvert"
+version = "1.0.0"
+edition = "2024"
+build = "src/build.rs"
+
+[build-dependencies]
+winres = "0.1.12"
+
+[dependencies]
+clap = { version = "3.2", features = ["derive"] }
