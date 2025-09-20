@@ -240,6 +240,9 @@ fn transcode_with_progress(select_type: i32, input_path: &str, output_path: &Pat
     let mut total_duration: Option<Duration> = None;
     let mut buffer = String::new();
 
+    //当前时间戳
+    let start_timestamp = std::time::Instant::now();
+
     for byte in reader.bytes() {
         if let Ok(b) = byte {
             let ch = b as char;
@@ -256,19 +259,29 @@ fn transcode_with_progress(select_type: i32, input_path: &str, output_path: &Pat
                     // 解析进度信息
                     if let Some(total) = total_duration {
                         if let Some(progress) = parse_progress(&buffer) {
-                            let percentage = if total.as_secs() > 0 {
-                                (progress.current_time.as_secs() * 100) / total.as_secs()
+                            let percentage: f64 = if total.as_secs() > 0 {
+                                ((progress.current_time.as_secs() as f64)* 100.0) / (total.as_secs() as f64)
                             } else {
-                                0
+                                0.0
+                            };
+
+                            //根据已用时间和百分比计算估计剩余时间
+                            let estimated_remaining = if percentage > 0.0 && percentage < 100.0 {
+                                let elapsed = std::time::Instant::now() - start_timestamp;
+                                let remain_sec = (100.0 - percentage) * (elapsed.as_secs() as f64) / percentage;
+                                Duration::from_secs(remain_sec as u64)
+                            } else {
+                                Duration::new(0, 0)
                             };
 
                             // 在同一行更新进度
                             print!(
-                                "\r    [{}%] {} / {} {}    ",
+                                "\r    [{:3.1}%] {} / {} {} 预估剩余时间: {}  ",
                                 percentage,
                                 format_duration(&progress.current_time),
                                 format_duration(&total),
-                                progress.speed_elapsed.replace("speed=", "编码速度: ").replace("elapsed=", "  编码耗时: ")
+                                progress.speed_elapsed.replace("speed=", "编码速度: ").replace("elapsed=", "  编码耗时: "),
+                                format_duration(&estimated_remaining)
                             );
                             std::io::stdout().flush().unwrap();
                         }
@@ -280,6 +293,10 @@ fn transcode_with_progress(select_type: i32, input_path: &str, output_path: &Pat
             }
         }
     }
+
+    // ffmpeg的进度输出可能达不到100%， 确保显示100%完成
+    print!("\r    [100%]  ");
+    std::io::stdout().flush().unwrap();
 
     let status = child.wait().expect("子进程执行失败");
     status.success()
@@ -353,9 +370,8 @@ fn format_duration(duration: &Duration) -> String {
     let hours = total_seconds / 3600;
     let minutes = (total_seconds % 3600) / 60;
     let seconds = total_seconds % 60;
-    let millis = duration.subsec_millis() / 10; // 取两位小数
 
-    format!("{:02}:{:02}:{:02}.{:02}", hours, minutes, seconds, millis)
+    format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
 }
 
 fn is_video_file(path: &Path, exts: &[&str]) -> bool {
