@@ -260,28 +260,42 @@ fn transcode_with_progress(select_type: i32, input_path: &str, output_path: &Pat
                     if let Some(total) = total_duration {
                         if let Some(progress) = parse_progress(&buffer) {
                             let percentage: f64 = if total.as_secs() > 0 {
+                                if progress.current_time.as_secs() == total.as_secs() {
+                                    100.0
+                                } else {
                                 ((progress.current_time.as_secs() as f64)* 100.0) / (total.as_secs() as f64)
+                                }
                             } else {
                                 0.0
                             };
 
+                            let elapsed_secs = (std::time::Instant::now() - start_timestamp).as_secs();
+
                             //根据已用时间和百分比计算估计剩余时间
                             let estimated_remaining = if percentage > 0.0 && percentage < 100.0 {
-                                let elapsed = std::time::Instant::now() - start_timestamp;
-                                let remain_sec = (100.0 - percentage) * (elapsed.as_secs() as f64) / percentage;
-                                Duration::from_secs(remain_sec as u64)
+                                let remain_sec = (100.0 - percentage) * (elapsed_secs as f64) / percentage;
+                                remain_sec as u64
+                            } else if percentage == 100.0 {
+                                0
                             } else {
-                                Duration::new(0, 0)
+                                total.as_secs()
+                            };
+
+                            let remain_str = if estimated_remaining > 0 {
+                                format!("预估剩余时间:{}", format_duration(&Duration::from_secs(estimated_remaining)))
+                            } else {
+                                "已完成                ".to_string()
                             };
 
                             // 在同一行更新进度
                             print!(
-                                "\r    [{:3.1}%] {} / {} {} 预估剩余时间: {}  ",
+                                "\r    [{:3.1}%] {} / {} 编码速度:{} 编码耗时:{} {}   ",
                                 percentage,
                                 format_duration(&progress.current_time),
                                 format_duration(&total),
-                                progress.speed_elapsed.replace("speed=", "编码速度: ").replace("elapsed=", "  编码耗时: "),
-                                format_duration(&estimated_remaining)
+                                progress.speed_str,
+                                format_duration(&Duration::from_secs(elapsed_secs)),
+                                remain_str
                             );
                             std::io::stdout().flush().unwrap();
                         }
@@ -294,12 +308,26 @@ fn transcode_with_progress(select_type: i32, input_path: &str, output_path: &Pat
         }
     }
 
-    // ffmpeg的进度输出可能达不到100%， 确保显示100%完成
-    print!("\r    [100%]  ");
-    std::io::stdout().flush().unwrap();
-
     let status = child.wait().expect("子进程执行失败");
-    status.success()
+    let is_success = status.success();
+
+    if is_success {
+        // ffmpeg的进度输出可能达不到100%， 确保显示100%完成
+        if let Some(total) = total_duration {
+            let elapsed_secs = (std::time::Instant::now() - start_timestamp).as_secs();
+            print!(
+                "\r    [100%] 视频时长:{} 编码速度:{:1.1}x 编码耗时:{} 已完成                ",
+                format_duration(&total),
+                total.as_secs_f64() / (elapsed_secs as f64),
+                format_duration(&Duration::from_secs(elapsed_secs))
+            );
+        }else{
+            print!("\r    [100%]  ");
+        }
+        std::io::stdout().flush().unwrap();
+    }
+
+    is_success
 }
 
 fn parse_total_duration(line: &str) -> Option<Duration> {
@@ -315,7 +343,7 @@ fn parse_total_duration(line: &str) -> Option<Duration> {
 
 struct ProgressInfo {
     current_time: Duration,
-    speed_elapsed: String,
+    speed_str: String,
 }
 
 fn parse_progress(line: &str) -> Option<ProgressInfo> {
@@ -331,18 +359,29 @@ fn parse_progress(line: &str) -> Option<ProgressInfo> {
         None
     };
 
-    // 从 speed= 字段直到行尾
-    let speed_elapsed_str = if let Some(start) = line.find("speed=") {
-        let speed_str = &line[start..];
-        speed_str.trim().to_string()        
+    // 提取 speed= 后到 x 字符（包含 x）
+    let speed_str = if let Some(start) = line.find("speed=") {
+        let speed_part = &line[start + 6..];
+        if let Some(x_pos) = speed_part.find('x') {
+            speed_part[..=x_pos].trim().to_string()
+        } else {
+            "0.0x  ".to_string()
+        }
     } else {
-        "unknown".to_string()
+        "0.0x  ".to_string()
+    };
+
+    // 如果speed_str过短，补齐空格
+    let speed_str = if speed_str.len() < 6 {
+        format!("{:<6}", speed_str)
+    } else {
+        speed_str
     };
 
     if let Some(time) = time {
         Some(ProgressInfo {
             current_time: time,
-            speed_elapsed: speed_elapsed_str,
+            speed_str: speed_str,
         })
     } else {
         None
