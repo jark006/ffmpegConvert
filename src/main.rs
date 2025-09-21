@@ -272,7 +272,9 @@ fn transcode_with_progress(select_type: i32, input_path: &str, output_path: &Pat
                             let elapsed_secs = (std::time::Instant::now() - start_timestamp).as_secs();
 
                             //根据已用时间和百分比计算估计剩余时间
-                            let estimated_remaining = if percentage > 0.0 && percentage < 100.0 {
+                            let estimated_remaining = if elapsed_secs < 2 {
+                                total.as_secs()
+                            } else if percentage > 0.0 && percentage < 100.0 {
                                 let remain_sec = (100.0 - percentage) * (elapsed_secs as f64) / percentage;
                                 remain_sec as u64
                             } else if percentage == 100.0 {
