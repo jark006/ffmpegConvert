@@ -4,6 +4,20 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread::sleep;
 use std::time::Duration;
+use winapi::um::wincon::SetConsoleTitleW;
+use std::ffi::OsStr;
+use std::os::windows::ffi::OsStrExt;
+
+pub fn set_console_title(title: &str) -> bool {
+    let wide: Vec<u16> = OsStr::new(title)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    
+    unsafe {
+        SetConsoleTitleW(wide.as_ptr()) != 0
+    }
+}
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -106,7 +120,7 @@ fn main() {
 
     println!("\n找到 {} 个视频文件需要处理", video_files.len());
     if video_files.is_empty() {
-        sleep(Duration::from_secs(10)); // 10秒后自动关闭
+        sleep(Duration::from_secs(2)); // 2秒后自动关闭
         return;
     }
 
@@ -131,6 +145,17 @@ fn main() {
             100 * file_count / total_files,
             video_path
         );
+        
+        set_console_title(&format!(
+            "[{}/{}] {}% {}",
+            file_count,
+            total_files,
+            100 * file_count / total_files,
+            Path::new(video_path)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or(video_path)
+        ));
 
         let output_path = {
             let mut p = PathBuf::from(video_path);
