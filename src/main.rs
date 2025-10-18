@@ -7,6 +7,8 @@ use std::process::{Command, Stdio};
 use std::thread::sleep;
 use std::time::Duration;
 use winapi::um::wincon::SetConsoleTitleW;
+use std::fmt;
+use winapi::shared::ntdef::HANDLE;
 
 pub fn set_console_title(title: &str) -> bool {
     let wide: Vec<u16> = OsStr::new(title)
@@ -15,6 +17,56 @@ pub fn set_console_title(title: &str) -> bool {
         .collect();
 
     unsafe { SetConsoleTitleW(wide.as_ptr()) != 0 }
+}
+
+struct ConvertParameter {
+    params: &'static str,
+    subfix: &'static str,
+    description: &'static str,
+}
+
+// 读取额外参数（从与可执行文件同名但扩展名为 .txt 的旁侧文件）
+fn load_params_from_sidecar(convert_params: &mut Vec<ConvertParameter>) {
+    if let Ok(mut sidecar) = env::current_exe() {
+        sidecar.set_extension("txt");
+        if !sidecar.exists() {
+            return;
+        }
+
+        let content = match std::fs::read_to_string(&sidecar) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with("//") || line.starts_with('#') {
+                continue; // 跳过空行和注释行
+            }
+
+            // 按第一个 '#' 分割，前面是参数，中间是输出文件名称的附加后缀，后面是描述（可选）
+            let parts: Vec<&str> = line.split('#').map(|s| s.trim()).collect();
+            if parts.len() < 2 {
+                continue; // 至少需要参数和输出后缀
+            }
+
+            let params_part = parts[0];
+            let subfix_part = parts[1];
+            let desc_part = if parts.len() > 2 { parts[2] } else { parts[0] };
+
+            // 过滤无意义行：参数部分不能为空且应包含 '-'（简单判断）
+            if params_part.is_empty() || !params_part.contains('-') {
+                continue;
+            }
+
+            // 将动态字符串泄漏为 'static，方便与现有 ConvertParameter<'static> 兼容
+            let params: &'static str = Box::leak(params_part.to_string().into_boxed_str());
+            let subfix: &'static str = Box::leak(subfix_part.to_string().into_boxed_str());
+            let description: &'static str = Box::leak(desc_part.to_string().into_boxed_str());
+
+            convert_params.push(ConvertParameter { params, subfix, description });
+        }
+    }
 }
 
 fn main() {
@@ -31,29 +83,45 @@ fn main() {
         std::process::exit(1);
     }
 
-    println!(
-        "选择要转码的目标编码类型:
-1. H265 (libx265)   CPU编码, 较慢
-2. H265 (hevc_amf)  AMD GPU硬件加速编码, 速度快
-3. AV1  (libsvtav1) CPU编码, 非常慢
+    let mut convert_params: Vec<ConvertParameter> = vec![
+        ConvertParameter {
+            params: "-c:a aac -c:v libx265 -crf 23 -preset slow",
+            subfix: "_H265",
+            description: "H265 (libx265)   CPU编码, 较慢",
+        },
+        ConvertParameter {
+            params: "-c:a aac -c:v hevc_amf -quality quality -rc cqp -qp_i 22 -qp_p 22",
+            subfix: "_H265",
+            description: "H265 (hevc_amf)  AMD GPU硬件加速编码, 速度快",
+        },
+        ConvertParameter {
+            params: "-c:a aac -c:v libsvtav1 -crf 28 -preset 5",
+            subfix: "_AV1",
+            description: "AV1  (libsvtav1) CPU编码, 非常慢",
+        },
+    ];
 
-输入1或2或3则对应以上转码目标，转码完成则正常退出程序。
-如果输入负数则转码完成后将自动关机 (30秒后关机)。\n"
-    );
+    load_params_from_sidecar(&mut convert_params);
 
-    let mut select_type = 0;
+    println!("选择要转码的目标编码类型的序号，转码完成则正常退出程序。如果输入负数序号则转码完成后将自动关机 (30秒后关机)。\n");
+    for (i, param) in convert_params.iter().enumerate() {
+        println!("  {:<2}: {}", i + 1, param.description);
+    }
+    println!();
+
+    let mut select_index = 0;
     let mut shutdown_when_done = false;
 
-    while select_type <= 0 || select_type > 3 {
-        print!("请输入目标编码类型 (1/2/3): ");
+    while select_index <= 0 || select_index > (convert_params.len() as i32) {
+        print!("请输入序号: ");
         std::io::stdout().flush().unwrap(); // 确保提示立即显示
 
         let mut input = String::new();
         if std::io::stdin().read_line(&mut input).is_ok() {
-            select_type = input.trim().parse().unwrap_or(0);
+            select_index = input.trim().parse::<i32>().unwrap_or(0);
 
-            if select_type < 0 {
-                select_type = -select_type;
+            if select_index < 0 {
+                select_index = -select_index;
                 shutdown_when_done = true;
             }
         }
@@ -134,19 +202,16 @@ fn main() {
 
         let output_path = {
             let mut p = PathBuf::from(video_path);
-            let file_stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
-            let new_file_name = match select_type {
-                1 | 2 => format!("{}_H265.mp4", file_stem),
-                3 => format!("{}_AV1.mp4", file_stem),
-                _ => format!("{}_output.mp4", file_stem),
-            };
+            let default_output_name = format!("output_{}", chrono::Local::now().format("%Y%m%d%H%M%S"));
+            let file_stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or(default_output_name.as_str());
+            let new_file_name = format!("{}{}.mp4", file_stem, convert_params[(select_index - 1) as usize].subfix);            
             p.set_file_name(new_file_name.replace("_H264", "").replace("_h264", ""));
             p
         };
 
         // 执行转码并显示进度
         if !transcode_with_progress(
-            select_type,
+            &convert_params[(select_index - 1) as usize],
             &video_path,
             &output_path,
             &format!("[{}/{}]", file_count, total_files),
@@ -171,78 +236,24 @@ fn main() {
 }
 
 fn transcode_with_progress(
-    select_type: i32,
+    convert_params: &ConvertParameter,
     input_path: &str,
     output_path: &PathBuf,
     title_prefix: &str,
 ) -> bool {
-    let mut child = match select_type {
-        1 => Command::new("ffmpeg.exe")
-            .arg("-hide_banner")
-            .arg("-i")
-            .arg(input_path)
-            .arg("-c:a")
-            .arg("aac")
-            .arg("-c:v")
-            .arg("libx265")
-            .arg("-crf")
-            .arg("23")
-            .arg("-preset")
-            .arg("slow")
-            .arg("-y") // 覆盖输出文件
-            .arg(output_path)
-            .stderr(Stdio::piped())
-            .stdout(Stdio::null())
-            .stdin(Stdio::null())
-            .spawn()
-            .expect("无法启动 ffmpeg"),
 
-        2 => Command::new("ffmpeg.exe")
-            .arg("-hide_banner")
-            .arg("-i")
-            .arg(&input_path)
-            .arg("-c:a")
-            .arg("aac")
-            .arg("-c:v")
-            .arg("hevc_amf")
-            .arg("-quality")
-            .arg("quality")
-            .arg("-rc")
-            .arg("cqp")
-            .arg("-qp_i")
-            .arg("22")
-            .arg("-qp_p")
-            .arg("22")
-            .arg("-y") // 覆盖输出文件
-            .arg(&output_path)
-            .stderr(Stdio::piped())
-            .stdout(Stdio::null())
-            .stdin(Stdio::null())
-            .spawn()
-            .expect("无法启动 ffmpeg"),
-
-        3 => Command::new("ffmpeg.exe")
-            .arg("-hide_banner")
-            .arg("-i")
-            .arg(&input_path)
-            .arg("-c:a")
-            .arg("aac")
-            .arg("-c:v")
-            .arg("libsvtav1")
-            .arg("-crf")
-            .arg("28")
-            .arg("-preset")
-            .arg("5")
-            .arg("-y") // 覆盖输出文件
-            .arg(&output_path)
-            .stderr(Stdio::piped())
-            .stdout(Stdio::null())
-            .stdin(Stdio::null())
-            .spawn()
-            .expect("无法启动 ffmpeg"),
-
-        _ => return false,
-    };
+    let mut child = Command::new("ffmpeg.exe")
+        .arg("-hide_banner")
+        .arg("-i")
+        .arg(&input_path)
+        .args(convert_params.params.split_whitespace())
+        .arg("-y") // 覆盖输出文件
+        .arg(&output_path)
+        .stderr(Stdio::piped())
+        .stdout(Stdio::null())
+        .stdin(Stdio::null())
+        .spawn()
+        .expect("无法启动 ffmpeg");
 
     let stderr = child.stderr.take().expect("无法获取 stderr");
     let reader = BufReader::new(stderr);
@@ -359,6 +370,77 @@ fn transcode_with_progress(
         } else {
             print!("\r    [100%]  ");
         }
+
+        // 再输出文件体积对比，例如: 795.46 MB -> 389.43 MB (-51%)
+        if let Ok(input_metadata) = std::fs::metadata(input_path) {
+            if let Ok(output_metadata) = std::fs::metadata(output_path) {
+                let input_size = input_metadata.len() as f64;
+                let output_size = output_metadata.len() as f64;
+                let reduction = if input_size > 0.0 {
+                    100.0 * (output_size - input_size) / input_size
+                } else {
+                    0.0
+                };
+
+                fn format_size(size: f64) -> String {
+                    if size >= 1_073_741_824.0 {
+                        format!("{:.2} GB", size / 1_073_741_824.0)
+                    } else if size >= 1_048_576.0 {
+                        format!("{:.2} MB", size / 1_048_576.0)
+                    } else if size >= 1024.0 {
+                        format!("{:.2} KB", size / 1024.0)
+                    } else {
+                        format!("{:.2} B", size)
+                    }
+                }
+                println!();
+
+                println!(
+                    "    {} -> {} ({:.1}%)",
+                    format_size(input_size),
+                    format_size(output_size),
+                    {
+                        // 包装一个带有 Drop 的临时值，保证在 println 完成后恢复控制台颜色
+                        struct ColorF64 {
+                            val: f64,
+                            handle: HANDLE,
+                        }
+                        impl fmt::Display for ColorF64 {
+                            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                                // 保证以一位小数输出（与原来 {:.1} 一致）
+                                write!(f, "{:.1}", self.val)
+                            }
+                        }
+                        impl Drop for ColorF64 {
+                            fn drop(&mut self) {
+                                unsafe {
+                                    // 恢复默认颜色（白色）
+                                    let _ = winapi::um::wincon::SetConsoleTextAttribute(self.handle, 0x07);
+                                }
+                            }
+                        }
+
+                        let attr: u16 = if reduction > 0.0 {
+                            0x0C // 明亮红色 (FOREGROUND_RED | FOREGROUND_INTENSITY)
+                        } else if reduction < -20.0 {
+                            0x0A // 明亮绿色 (FOREGROUND_GREEN | FOREGROUND_INTENSITY)
+                        } else if reduction < 0.0 {
+                            0x09 // 蓝色 (FOREGROUND_BLUE | FOREGROUND_INTENSITY)
+                        } else {
+                            0x07 // 默认
+                        };
+
+                        let h: HANDLE = unsafe { winapi::um::processenv::GetStdHandle(winapi::um::winbase::STD_OUTPUT_HANDLE) };
+                        unsafe {
+                            let _ = winapi::um::wincon::SetConsoleTextAttribute(h, attr);
+                        }
+
+                        ColorF64 { val: reduction, handle: h }
+                    }
+                );
+            }
+        }
+
         std::io::stdout().flush().unwrap();
     }
 
