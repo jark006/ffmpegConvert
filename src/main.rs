@@ -25,6 +25,12 @@ struct ConvertParameter {
     description: &'static str,
 }
 
+fn log_file_path() -> PathBuf {
+    let mut p = env::current_exe().expect("无法获取可执行文件路径");
+    p.set_extension("log");
+    p
+}
+
 // 读取额外参数（从与可执行文件同名但扩展名为 .txt 的旁侧文件）
 fn load_params_from_sidecar(convert_params: &mut Vec<ConvertParameter>) {
     if let Ok(mut sidecar) = env::current_exe() {
@@ -240,7 +246,18 @@ fn transcode_with_progress(
     input_path: &str,
     output_path: &PathBuf,
     title_prefix: &str,
-) -> bool {
+    ) -> bool {
+
+    // 输出日志
+    match std::fs::OpenOptions::new().create(true).append(true).open(log_file_path()) {
+        Ok(mut f) => {
+            let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+            let _ = writeln!(f, "[{}] 输入: {}", ts, input_path);
+        }
+        Err(e) => {
+            eprintln!("无法打开日志文件 {}: {}", log_file_path().display(), e);
+        }
+    }
 
     let mut child = Command::new("ffmpeg.exe")
         .arg("-hide_banner")
@@ -358,17 +375,38 @@ fn transcode_with_progress(
     let is_success = status.success();
 
     if is_success {
+        let mut log_content = format!(
+            "[{}] 输出: {}\n                      ",
+            chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+            output_path.display()
+        );
+
+        let mut elapsed_secs = (std::time::Instant::now() - start_timestamp).as_secs();
+        if elapsed_secs == 0 {
+            elapsed_secs = 1;
+        }
+
         // ffmpeg的进度输出可能达不到100%， 确保显示100%完成
         if let Some(total) = total_duration {
-            let elapsed_secs = (std::time::Instant::now() - start_timestamp).as_secs();
             print!(
                 "\r    [100%] 视频时长:{} 速度:{:1.1}x 用时:{} 已完成                ",
                 format_duration(&total),
                 total.as_secs_f64() / (elapsed_secs as f64),
                 format_duration(&Duration::from_secs(elapsed_secs))
             );
+
+            log_content.push_str(&format!(
+                "视频时长:{} 速度:{:1.1}x 用时:{}    ",
+                format_duration(&total),
+                total.as_secs_f64() / (elapsed_secs as f64),
+                format_duration(&Duration::from_secs(elapsed_secs))
+            ));
         } else {
             print!("\r    [100%]  ");
+
+            log_content.push_str(&format!(
+                "用时:{}    ", format_duration(&Duration::from_secs(elapsed_secs))
+            ));
         }
 
         // 再输出文件体积对比，例如: 795.46 MB -> 389.43 MB (-51%)
@@ -394,6 +432,13 @@ fn transcode_with_progress(
                     }
                 }
                 println!();
+
+                log_content.push_str(&format!(
+                    "{} -> {} ({:.1}%)",
+                    format_size(input_size),
+                    format_size(output_size),
+                    reduction
+                ));
 
                 println!(
                     "    {} -> {} ({:.1}%)",
@@ -442,6 +487,16 @@ fn transcode_with_progress(
         }
 
         std::io::stdout().flush().unwrap();
+        
+        // 记录日志
+        match std::fs::OpenOptions::new().create(true).append(true).open(log_file_path()) {
+            Ok(mut f) => {
+                let _ = writeln!(f, "{}", log_content);
+            }
+            Err(e) => {
+                eprintln!("无法打开日志文件 {}: {}", log_file_path().display(), e);
+            }
+        }
     }
 
     is_success
