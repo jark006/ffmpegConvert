@@ -13,9 +13,9 @@
 ### 实际命令行参数
 
 ```sh
-ffmpeg -hide_banner -i "input.mp4" -c:a copy -c:v libx265 -crf 23 -preset slow -y "output_H265.mp4"
-ffmpeg -hide_banner -i "input.mp4" -c:a copy -c:v hevc_amf -quality quality -rc cqp -qp_i 22 -qp_p 22 -y "output_H265.mp4"
-ffmpeg -hide_banner -i "input.mp4" -c:a copy -c:v libsvtav1 -crf 28 -preset 5 -y "output_AV1.mp4"
+ffmpeg -hide_banner -i "input.mp4" -c:a aac -c:v libx265 -crf 23 -preset slow -y "output_H265.mp4"
+ffmpeg -hide_banner -i "input.mp4" -c:a aac -c:v hevc_amf -quality quality -rc cqp -qp_i 22 -qp_p 22 -y "output_H265.mp4"
+ffmpeg -hide_banner -i "input.mp4" -c:a aac -c:v libsvtav1 -crf 28 -preset 5 -y "output_AV1.mp4"
 ```
 **为了软件快捷使用，以上参数不可更改。若需要其他参数，则需编辑源码，重新编译**
 

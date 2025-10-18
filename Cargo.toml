@@ -10,3 +10,4 @@ winres = "0.1.12"
 [dependencies]
 clap = { version = "3.2", features = ["derive"] }
 winapi = { version = "0.3", features = ["wincon"] }
+natural-sort-rs = "0.2.1"

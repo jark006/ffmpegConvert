@@ -1,22 +1,20 @@
 use std::env;
+use std::ffi::OsStr;
 use std::io::{BufReader, Read, Write};
+use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread::sleep;
 use std::time::Duration;
 use winapi::um::wincon::SetConsoleTitleW;
-use std::ffi::OsStr;
-use std::os::windows::ffi::OsStrExt;
 
 pub fn set_console_title(title: &str) -> bool {
     let wide: Vec<u16> = OsStr::new(title)
         .encode_wide()
         .chain(std::iter::once(0))
         .collect();
-    
-    unsafe {
-        SetConsoleTitleW(wide.as_ptr()) != 0
-    }
+
+    unsafe { SetConsoleTitleW(wide.as_ptr()) != 0 }
 }
 
 fn main() {
@@ -40,38 +38,22 @@ fn main() {
 3. AV1  (libsvtav1) CPU编码, 非常慢
 
 输入1或2或3则对应以上转码目标，转码完成则正常退出程序。
-如果输入11或22或33则对应以上转码目标，但转码完成后将自动关机 (30秒后关机)。\n"
+如果输入负数则转码完成后将自动关机 (30秒后关机)。\n"
     );
 
     let mut select_type = 0;
     let mut shutdown_when_done = false;
 
-    while select_type == 0 {
+    while select_type <= 0 || select_type > 3 {
         print!("请输入目标编码类型 (1/2/3): ");
         std::io::stdout().flush().unwrap(); // 确保提示立即显示
 
         let mut input = String::new();
         if std::io::stdin().read_line(&mut input).is_ok() {
-            let input = input.trim().to_lowercase();
+            select_type = input.trim().parse().unwrap_or(0);
 
-            select_type = match input.as_str() {
-                "1" | "x265" => 1,
-                "2" | "amf" => 2,
-                "3" | "av1" => 3,
-                "11" => 11,
-                "22" => 22,
-                "33" => 33,
-                _ => 0,
-            };
-
-            if select_type == 11 {
-                select_type = 1;
-                shutdown_when_done = true;
-            }else if select_type == 22 {
-                select_type = 2;
-                shutdown_when_done = true;
-            }else if select_type == 33 {
-                select_type = 3;
+            if select_type < 0 {
+                select_type = -select_type;
                 shutdown_when_done = true;
             }
         }
@@ -107,7 +89,7 @@ fn main() {
             find_video_files(path, &video_exts, &mut video_files);
         }
     }
-    
+
     // 过滤掉 _h265 和 _av1 结尾的文件
     video_files.retain(|p| {
         if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
@@ -124,9 +106,19 @@ fn main() {
         return;
     }
 
+    video_files.sort_by(|a, b| {
+        let a_str = a.to_string_lossy();
+        let b_str = b.to_string_lossy();
+        natural_sort_rs::natural_cmp(&a_str, &b_str)
+    });
+
     let mut idx = 1;
     for video_path in video_files.iter() {
-        println!("{:<2}: {}", idx, video_path.to_string_lossy()[4..].to_string());
+        println!(
+            "{:<2}: {}",
+            idx,
+            video_path.to_string_lossy()[4..].to_string()
+        );
         idx += 1;
     }
     println!();
@@ -138,24 +130,7 @@ fn main() {
         let video_path = video_path.to_string_lossy();
         let video_path: &str = &video_path[4..]; // 去掉前面的 "\\?\" 之类的
 
-        println!(
-            "[{}/{}] [{}%] 处理中: {}",
-            file_count,
-            total_files,
-            100 * file_count / total_files,
-            video_path
-        );
-        
-        set_console_title(&format!(
-            "[{}/{}] {}% {}",
-            file_count,
-            total_files,
-            100 * file_count / total_files,
-            Path::new(video_path)
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or(video_path)
-        ));
+        println!("[{}/{}] 处理中: {}", file_count, total_files, video_path);
 
         let output_path = {
             let mut p = PathBuf::from(video_path);
@@ -170,7 +145,12 @@ fn main() {
         };
 
         // 执行转码并显示进度
-        if !transcode_with_progress(select_type, &video_path, &output_path) {
+        if !transcode_with_progress(
+            select_type,
+            &video_path,
+            &output_path,
+            &format!("[{}/{}]", file_count, total_files),
+        ) {
             eprintln!("\n处理失败: {}", video_path);
         } else {
             println!(); // 换行，为下一个文件的处理做准备
@@ -182,15 +162,20 @@ fn main() {
     if shutdown_when_done {
         // shutdown.exe -s -t 30
         Command::new("shutdown.exe")
-        .arg("-s")
-        .arg("-t")
-        .arg("30")
-        .spawn()
-        .expect("无法计划关机");
+            .arg("-s")
+            .arg("-t")
+            .arg("30")
+            .spawn()
+            .expect("无法计划关机");
     }
 }
 
-fn transcode_with_progress(select_type: i32, input_path: &str, output_path: &PathBuf) -> bool {
+fn transcode_with_progress(
+    select_type: i32,
+    input_path: &str,
+    output_path: &PathBuf,
+    title_prefix: &str,
+) -> bool {
     let mut child = match select_type {
         1 => Command::new("ffmpeg.exe")
             .arg("-hide_banner")
@@ -268,6 +253,8 @@ fn transcode_with_progress(select_type: i32, input_path: &str, output_path: &Pat
     //当前时间戳
     let start_timestamp = std::time::Instant::now();
 
+    let mut percent_int_last = -1;
+
     for byte in reader.bytes() {
         if let Ok(b) = byte {
             let ch = b as char;
@@ -288,19 +275,22 @@ fn transcode_with_progress(select_type: i32, input_path: &str, output_path: &Pat
                                 if progress.current_time.as_secs() == total.as_secs() {
                                     100.0
                                 } else {
-                                ((progress.current_time.as_secs() as f64)* 100.0) / (total.as_secs() as f64)
+                                    ((progress.current_time.as_secs() as f64) * 100.0)
+                                        / (total.as_secs() as f64)
                                 }
                             } else {
                                 0.0
                             };
 
-                            let elapsed_secs = (std::time::Instant::now() - start_timestamp).as_secs();
+                            let elapsed_secs =
+                                (std::time::Instant::now() - start_timestamp).as_secs();
 
                             //根据已用时间和百分比计算估计剩余时间
                             let estimated_remaining = if elapsed_secs < 2 {
                                 total.as_secs()
                             } else if percentage > 0.0 && percentage < 100.0 {
-                                let remain_sec = (100.0 - percentage) * (elapsed_secs as f64) / percentage;
+                                let remain_sec =
+                                    (100.0 - percentage) * (elapsed_secs as f64) / percentage;
                                 remain_sec as u64
                             } else if percentage == 100.0 {
                                 0
@@ -309,14 +299,17 @@ fn transcode_with_progress(select_type: i32, input_path: &str, output_path: &Pat
                             };
 
                             let remain_str = if estimated_remaining > 0 {
-                                format!("预估剩余时间:{}", format_duration(&Duration::from_secs(estimated_remaining)))
+                                format!(
+                                    "剩余:{}",
+                                    format_duration(&Duration::from_secs(estimated_remaining))
+                                )
                             } else {
                                 "已完成                ".to_string()
                             };
 
                             // 在同一行更新进度
                             print!(
-                                "\r    [{:3.1}%] {} / {} 编码速度:{} 编码耗时:{} {}   ",
+                                "\r    [{:3.1}%] {} / {} 速度:{} 用时:{} {}   ",
                                 percentage,
                                 format_duration(&progress.current_time),
                                 format_duration(&total),
@@ -325,6 +318,21 @@ fn transcode_with_progress(select_type: i32, input_path: &str, output_path: &Pat
                                 remain_str
                             );
                             std::io::stdout().flush().unwrap();
+
+                            let percen_int = percentage as i32;
+                            if percen_int != percent_int_last {
+                                percent_int_last = percen_int;
+
+                                set_console_title(&format!(
+                                    "{} {}% {}",
+                                    title_prefix,
+                                    percen_int,
+                                    Path::new(input_path)
+                                        .file_name()
+                                        .and_then(|s| s.to_str())
+                                        .unwrap_or(input_path)
+                                ));
+                            }
                         }
                     }
                 }
@@ -343,12 +351,12 @@ fn transcode_with_progress(select_type: i32, input_path: &str, output_path: &Pat
         if let Some(total) = total_duration {
             let elapsed_secs = (std::time::Instant::now() - start_timestamp).as_secs();
             print!(
-                "\r    [100%] 视频时长:{} 编码速度:{:1.1}x 编码耗时:{} 已完成                ",
+                "\r    [100%] 视频时长:{} 速度:{:1.1}x 用时:{} 已完成                ",
                 format_duration(&total),
                 total.as_secs_f64() / (elapsed_secs as f64),
                 format_duration(&Duration::from_secs(elapsed_secs))
             );
-        }else{
+        } else {
             print!("\r    [100%]  ");
         }
         std::io::stdout().flush().unwrap();
