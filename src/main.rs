@@ -1,14 +1,14 @@
 use std::env;
 use std::ffi::OsStr;
+use std::fmt;
 use std::io::{BufReader, Read, Write};
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread::sleep;
 use std::time::Duration;
-use winapi::um::wincon::SetConsoleTitleW;
-use std::fmt;
 use winapi::shared::ntdef::HANDLE;
+use winapi::um::wincon::SetConsoleTitleW;
 
 pub fn set_console_title(title: &str) -> bool {
     let wide: Vec<u16> = OsStr::new(title)
@@ -70,7 +70,11 @@ fn load_params_from_sidecar(convert_params: &mut Vec<ConvertParameter>) {
             let subfix: &'static str = Box::leak(subfix_part.to_string().into_boxed_str());
             let description: &'static str = Box::leak(desc_part.to_string().into_boxed_str());
 
-            convert_params.push(ConvertParameter { params, subfix, description });
+            convert_params.push(ConvertParameter {
+                params,
+                subfix,
+                description,
+            });
         }
     }
 }
@@ -115,7 +119,9 @@ fn main() {
 
     load_params_from_sidecar(&mut convert_params);
 
-    println!("选择要转码的目标编码类型的序号，转码完成则正常退出程序。如果输入负数序号则转码完成后将自动关机 (30秒后关机)。\n");
+    println!(
+        "选择要转码的目标编码类型的序号，转码完成则正常退出程序。如果输入负数序号则转码完成后将自动关机 (30秒后关机)。\n"
+    );
     for (i, param) in convert_params.iter().enumerate() {
         println!("  {:<2}: {}", i + 1, param.description);
     }
@@ -214,10 +220,24 @@ fn main() {
 
         let output_path = {
             let mut p = PathBuf::from(video_path);
-            let default_output_name = format!("output_{}", chrono::Local::now().format("%Y%m%d%H%M%S"));
-            let file_stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or(default_output_name.as_str());
-            let new_file_name = format!("{}{}.mp4", file_stem, convert_params[(select_index - 1) as usize].subfix);            
-            p.set_file_name(new_file_name.replace("_H264", "").replace("_h264", ""));
+            let default_output_name =
+                format!("output_{}", chrono::Local::now().format("%Y%m%d%H%M%S"));
+            let file_stem = p
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or(default_output_name.as_str());
+            let new_file_name = format!(
+                "{}{}.mp4",
+                file_stem,
+                convert_params[(select_index - 1) as usize].subfix
+            );
+            p.set_file_name(
+                new_file_name
+                    .replace("_H264", "")
+                    .replace("_h264", "")
+                    .replace("_H265", "")
+                    .replace("_h265", ""),
+            );
             p
         };
 
@@ -252,10 +272,14 @@ fn transcode_with_progress(
     input_path: &str,
     output_path: &PathBuf,
     title_prefix: &str,
-    ) -> bool {
+) -> bool {
 
     // 输出日志
-    match std::fs::OpenOptions::new().create(true).append(true).open(log_file_path()) {
+    match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_file_path())
+    {
         Ok(mut f) => {
             let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
             let _ = writeln!(f, "[{}] 输入: {}", ts, input_path);
@@ -293,87 +317,90 @@ fn transcode_with_progress(
         if let Ok(b) = byte {
             let ch = b as char;
 
-            if ch == '\r' || ch == '\n' {
-                if !buffer.is_empty() {
-                    // 解析总时长
-                    if total_duration.is_none() {
-                        if let Some(duration) = parse_total_duration(&buffer) {
-                            total_duration = Some(duration);
+            if ch != '\r' && ch != '\n' {
+                buffer.push(ch);
+                continue;
+            }
+
+            if buffer.is_empty() {
+                continue;
+            }
+
+            // 解析总时长
+            if total_duration.is_none() {
+                if let Some(duration) = parse_total_duration(&buffer) {
+                    total_duration = Some(duration);
+                }
+            }
+
+            // 解析进度信息
+            if let Some(total) = total_duration {
+                if let Some(progress) = parse_progress(&buffer) {
+                    let percentage: f64 = if total.as_millis() > 0 {
+                        if progress.current_time == total {
+                            100.0
+                        } else {
+                            ((progress.current_time.as_millis() as f64) * 100.0)
+                                / (total.as_millis() as f64)
                         }
-                    }
+                    } else {
+                        0.0
+                    };
 
-                    // 解析进度信息
-                    if let Some(total) = total_duration {
-                        if let Some(progress) = parse_progress(&buffer) {
-                            let percentage: f64 = if total.as_millis() > 0 {
-                                if progress.current_time == total {
-                                    100.0
-                                } else {
-                                    ((progress.current_time.as_millis() as f64) * 100.0)
-                                        / (total.as_millis() as f64)
-                                }
-                            } else {
-                                0.0
-                            };
+                    let elapsed_millis =
+                        (std::time::Instant::now() - start_timestamp).as_millis() as u64;
 
-                            let elapsed_millis =
-                                (std::time::Instant::now() - start_timestamp).as_millis() as u64;
+                    //根据已用时间和百分比计算估计剩余时间
+                    let estimated_remaining_millis = if elapsed_millis < 1000 {
+                        total.as_millis() as u64
+                    } else if percentage > 0.0 && percentage < 100.0 {
+                        let remain_millis =
+                            (100.0 - percentage) * (elapsed_millis as f64) / percentage;
+                        remain_millis as u64
+                    } else if percentage == 100.0 {
+                        0
+                    } else {
+                        total.as_millis() as u64
+                    };
 
-                            //根据已用时间和百分比计算估计剩余时间
-                            let estimated_remaining_millis = if elapsed_millis < 1_000_000 {
-                                total.as_millis() as u64
-                            } else if percentage > 0.0 && percentage < 100.0 {
-                                let remain_millis =
-                                    (100.0 - percentage) * (elapsed_millis as f64) / percentage;
-                                remain_millis as u64
-                            } else if percentage == 100.0 {
-                                0
-                            } else {
-                                total.as_millis() as u64
-                            };
+                    let remain_str = if estimated_remaining_millis > 0 {
+                        format!(
+                            "剩余:{}",
+                            format_duration(&Duration::from_millis(estimated_remaining_millis))
+                        )
+                    } else {
+                        "已完成                ".to_string()
+                    };
 
-                            let remain_str = if estimated_remaining_millis > 0 {
-                                format!(
-                                    "剩余:{}",
-                                    format_duration(&Duration::from_millis(estimated_remaining_millis))
-                                )
-                            } else {
-                                "已完成                ".to_string()
-                            };
+                    // 在同一行更新进度
+                    print!(
+                        "\r    [{:3.1}%] {} / {} 速度:{} 用时:{} {}   ",
+                        percentage,
+                        format_duration(&progress.current_time),
+                        format_duration(&total),
+                        progress.speed_str,
+                        format_duration(&Duration::from_millis(elapsed_millis)),
+                        remain_str
+                    );
+                    std::io::stdout().flush().unwrap();
 
-                            // 在同一行更新进度
-                            print!(
-                                "\r    [{:3.1}%] {} / {} 速度:{} 用时:{} {}   ",
-                                percentage,
-                                format_duration(&progress.current_time),
-                                format_duration(&total),
-                                progress.speed_str,
-                                format_duration(&Duration::from_millis(elapsed_millis)),
-                                remain_str
-                            );
-                            std::io::stdout().flush().unwrap();
+                    let percen_int = percentage as i32;
+                    if percen_int != percent_int_last {
+                        percent_int_last = percen_int;
 
-                            let percen_int = percentage as i32;
-                            if percen_int != percent_int_last {
-                                percent_int_last = percen_int;
-
-                                set_console_title(&format!(
-                                    "{} {}% {}",
-                                    title_prefix,
-                                    percen_int,
-                                    Path::new(input_path)
-                                        .file_name()
-                                        .and_then(|s| s.to_str())
-                                        .unwrap_or(input_path)
-                                ));
-                            }
-                        }
+                        set_console_title(&format!(
+                            "{} {}% {}",
+                            title_prefix,
+                            percen_int,
+                            Path::new(input_path)
+                                .file_name()
+                                .and_then(|s| s.to_str())
+                                .unwrap_or(input_path)
+                        ));
                     }
                 }
-                buffer.clear();
-            } else {
-                buffer.push(ch);
             }
+            buffer.clear();
         }
     }
 
@@ -411,7 +438,8 @@ fn transcode_with_progress(
             print!("\r    [100%]  ");
 
             log_content.push_str(&format!(
-                "用时:{}    ", format_duration(&Duration::from_secs(elapsed_secs))
+                "用时:{}    ",
+                format_duration(&Duration::from_secs(elapsed_secs))
             ));
         }
 
@@ -466,7 +494,10 @@ fn transcode_with_progress(
                             fn drop(&mut self) {
                                 unsafe {
                                     // 恢复默认颜色（白色）
-                                    let _ = winapi::um::wincon::SetConsoleTextAttribute(self.handle, 0x07);
+                                    let _ = winapi::um::wincon::SetConsoleTextAttribute(
+                                        self.handle,
+                                        0x07,
+                                    );
                                 }
                             }
                         }
@@ -481,21 +512,32 @@ fn transcode_with_progress(
                             0x07 // 默认
                         };
 
-                        let h: HANDLE = unsafe { winapi::um::processenv::GetStdHandle(winapi::um::winbase::STD_OUTPUT_HANDLE) };
+                        let h: HANDLE = unsafe {
+                            winapi::um::processenv::GetStdHandle(
+                                winapi::um::winbase::STD_OUTPUT_HANDLE,
+                            )
+                        };
                         unsafe {
                             let _ = winapi::um::wincon::SetConsoleTextAttribute(h, attr);
                         }
 
-                        ColorF64 { val: reduction, handle: h }
+                        ColorF64 {
+                            val: reduction,
+                            handle: h,
+                        }
                     }
                 );
             }
         }
 
         std::io::stdout().flush().unwrap();
-        
+
         // 记录日志
-        match std::fs::OpenOptions::new().create(true).append(true).open(log_file_path()) {
+        match std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log_file_path())
+        {
             Ok(mut f) => {
                 let _ = writeln!(f, "{}", log_content);
             }
