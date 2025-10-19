@@ -81,9 +81,10 @@ fn main() {
     if args.is_empty() {
         eprintln!(concat!(
             "请提供至少一个文件或文件夹路径作为参数\n\n",
-            "本软件用于给视频批量转到H265/AV1编码格式，请把视频文件或文件夹拖到本软件图标上即可，支持多个一起拖拽\n\n",
-            "本软件依赖 ffmpeg，需确保 ffmpeg.exe 已安装并添加到系统环境变量中\n\n",
-            "ffmpeg.exe 下载地址: https://www.gyan.dev/ffmpeg/builds/\n\n"
+            "本软件用于给视频批量转码，请把视频文件或文件夹拖到本软件图标上即可，支持多个一起拖拽\n\n",
+            "本软件依赖 ffmpeg，需确保 ffmpeg.exe 位于本程序同一目录下，或者将其所在文件夹添加到系统环境变量中\n\n",
+            "ffmpeg.exe 下载地址: https://www.gyan.dev/ffmpeg/builds/\n\n",
+            "本软件开源免费，源码地址: https://github.com/JARK006/ffmpegConvert"
         ));
         sleep(Duration::from_secs(600)); // 10分钟后自动关闭
         std::process::exit(1);
@@ -101,9 +102,14 @@ fn main() {
             description: "H265 (hevc_amf)  AMD GPU硬件加速编码, 速度快",
         },
         ConvertParameter {
-            params: "-c:a aac -c:v libsvtav1 -crf 28 -preset 5",
+            params: "-c:a aac -c:v libsvtav1 -crf 28 -preset 4",
             subfix: "_AV1",
             description: "AV1  (libsvtav1) CPU编码, 非常慢",
+        },
+        ConvertParameter {
+            params: "-c:a aac -c:v libaom-av1 -crf 28 -cpu-used 8 -b:v 0 -row-mt 1",
+            subfix: "_AV1",
+            description: "AV1  (libaom-av1) CPU编码, 最慢",
         },
     ];
 
@@ -299,37 +305,37 @@ fn transcode_with_progress(
                     // 解析进度信息
                     if let Some(total) = total_duration {
                         if let Some(progress) = parse_progress(&buffer) {
-                            let percentage: f64 = if total.as_secs() > 0 {
-                                if progress.current_time.as_secs() == total.as_secs() {
+                            let percentage: f64 = if total.as_millis() > 0 {
+                                if progress.current_time == total {
                                     100.0
                                 } else {
-                                    ((progress.current_time.as_secs() as f64) * 100.0)
-                                        / (total.as_secs() as f64)
+                                    ((progress.current_time.as_millis() as f64) * 100.0)
+                                        / (total.as_millis() as f64)
                                 }
                             } else {
                                 0.0
                             };
 
-                            let elapsed_secs =
-                                (std::time::Instant::now() - start_timestamp).as_secs();
+                            let elapsed_millis =
+                                (std::time::Instant::now() - start_timestamp).as_millis() as u64;
 
                             //根据已用时间和百分比计算估计剩余时间
-                            let estimated_remaining = if elapsed_secs < 2 {
-                                total.as_secs()
+                            let estimated_remaining_millis = if elapsed_millis < 1_000_000 {
+                                total.as_millis() as u64
                             } else if percentage > 0.0 && percentage < 100.0 {
-                                let remain_sec =
-                                    (100.0 - percentage) * (elapsed_secs as f64) / percentage;
-                                remain_sec as u64
+                                let remain_millis =
+                                    (100.0 - percentage) * (elapsed_millis as f64) / percentage;
+                                remain_millis as u64
                             } else if percentage == 100.0 {
                                 0
                             } else {
-                                total.as_secs()
+                                total.as_millis() as u64
                             };
 
-                            let remain_str = if estimated_remaining > 0 {
+                            let remain_str = if estimated_remaining_millis > 0 {
                                 format!(
                                     "剩余:{}",
-                                    format_duration(&Duration::from_secs(estimated_remaining))
+                                    format_duration(&Duration::from_millis(estimated_remaining_millis))
                                 )
                             } else {
                                 "已完成                ".to_string()
@@ -342,7 +348,7 @@ fn transcode_with_progress(
                                 format_duration(&progress.current_time),
                                 format_duration(&total),
                                 progress.speed_str,
-                                format_duration(&Duration::from_secs(elapsed_secs)),
+                                format_duration(&Duration::from_millis(elapsed_millis)),
                                 remain_str
                             );
                             std::io::stdout().flush().unwrap();
