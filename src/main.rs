@@ -1,3 +1,4 @@
+use core::time;
 use std::env;
 use std::ffi::OsStr;
 use std::fmt;
@@ -96,22 +97,22 @@ fn main() {
 
     let mut convert_params: Vec<ConvertParameter> = vec![
         ConvertParameter {
-            params: "-c:a aac -c:v libx265 -crf 23 -preset slow",
+            params: "-c:a libopus -b:a 128k -c:v libx265 -crf 23 -preset slow",
             subfix: "_H265",
             description: "H265 (libx265)   CPU编码, 较慢",
         },
         ConvertParameter {
-            params: "-c:a aac -c:v hevc_amf -quality quality -rc cqp -qp_i 22 -qp_p 22",
+            params: "-c:a libopus -b:a 128k -c:v hevc_amf -quality quality -rc cqp -qp_i 22 -qp_p 22",
             subfix: "_H265",
             description: "H265 (hevc_amf)  AMD GPU硬件加速编码, 速度快",
         },
         ConvertParameter {
-            params: "-c:a aac -c:v libsvtav1 -crf 28 -preset 4",
+            params: "-c:a libopus -b:a 128k -c:v libsvtav1 -crf 28 -preset 4",
             subfix: "_AV1",
             description: "AV1  (libsvtav1) CPU编码, 非常慢",
         },
         ConvertParameter {
-            params: "-c:a aac -c:v libaom-av1 -crf 28 -cpu-used 8 -b:v 0 -row-mt 1",
+            params: "-c:a libopus -b:a 128k -c:v libaom-av1 -crf 28 -cpu-used 8 -b:v 0 -row-mt 1",
             subfix: "_AV1",
             description: "AV1  (libaom-av1) CPU编码, 最慢",
         },
@@ -267,12 +268,36 @@ fn main() {
     }
 }
 
+fn check_ffmpeg_running() -> bool {
+    let output = Command::new("tasklist")
+        .arg("/FI")
+        .arg("IMAGENAME eq ffmpeg.exe")
+        .output()
+        .expect("无法执行 tasklist 命令");
+
+    let output_str = String::from_utf8_lossy(&output.stdout);
+    output_str.contains("ffmpeg.exe")
+}
+
 fn transcode_with_progress(
     convert_params: &ConvertParameter,
     input_path: &str,
     output_path: &PathBuf,
     title_prefix: &str,
 ) -> bool {
+    let mut wait_cnt = 0;
+    while check_ffmpeg_running() {
+        for i in 0..30 {
+            wait_cnt += 1;
+            print!(
+                "\r检测到有其他 ffmpeg 进程正在运行，等待 {} 秒后重试... 已等待 {} 秒",
+                30 - i,
+                wait_cnt
+            );
+            std::io::stdout().flush().unwrap();
+            sleep(time::Duration::from_secs(1));
+        }
+    }
 
     // 输出日志
     match std::fs::OpenOptions::new()
@@ -289,7 +314,7 @@ fn transcode_with_progress(
         }
     }
 
-    let mut child = Command::new("ffmpeg.exe")
+    let mut child = match Command::new("ffmpeg.exe")
         .arg("-hide_banner")
         .arg("-i")
         .arg(&input_path)
@@ -300,7 +325,16 @@ fn transcode_with_progress(
         .stdout(Stdio::null())
         .stdin(Stdio::null())
         .spawn()
-        .expect("无法启动 ffmpeg");
+    {
+        Ok(child) => child,
+        Err(e) => {
+            eprintln!(
+                "无法启动 ffmpeg: {}\n请确保 ffmpeg.exe 在系统 PATH 中或程序目录下",
+                e
+            );
+            return false;
+        }
+    };
 
     let stderr = child.stderr.take().expect("无法获取 stderr");
     let reader = BufReader::new(stderr);
