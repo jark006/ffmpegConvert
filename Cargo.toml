@@ -8,7 +8,6 @@ build = "src/build.rs"
 winres = "0.1.12"
 
 [dependencies]
-clap = { version = "3.2", features = ["derive"] }
 winapi = { version = "0.3", features = ["wincon"] }
-natural-sort-rs = "0.2.1"
+natural-sort-rs = "0.2"
 chrono = { version = "0.4"}

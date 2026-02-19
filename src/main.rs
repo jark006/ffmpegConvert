@@ -1,15 +1,41 @@
-use core::time;
 use std::env;
 use std::ffi::OsStr;
-use std::fmt;
 use std::io::{BufReader, Read, Write};
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread::sleep;
 use std::time::Duration;
-use winapi::shared::ntdef::HANDLE;
 use winapi::um::wincon::SetConsoleTitleW;
+
+
+pub enum Color {
+    Red,
+    Green,
+    Blue,
+    Yellow,
+    Magenta,
+    Cyan,
+    Custom(u8),
+}
+
+impl Color {
+    fn code(&self) -> u8 {
+        match self {
+            Color::Red => 31,
+            Color::Green => 32,
+            Color::Blue => 34,
+            Color::Yellow => 33,
+            Color::Magenta => 35,
+            Color::Cyan => 36,
+            Color::Custom(code) => *code,
+        }
+    }
+}
+
+pub fn color_text(text: &str, color: Color) -> String {
+    format!("\x1b[{}m{}\x1b[0m", color.code(), text)
+}
 
 pub fn set_console_title(title: &str) -> bool {
     let wide: Vec<u16> = OsStr::new(title)
@@ -85,13 +111,15 @@ fn main() {
 
     if args.is_empty() {
         eprintln!(concat!(
-            "请提供至少一个文件或文件夹路径作为参数\n\n",
-            "本软件用于给视频批量转码，请把视频文件或文件夹拖到本软件图标上即可，支持多个一起拖拽\n\n",
-            "本软件依赖 ffmpeg，需确保 ffmpeg.exe 位于本程序同一目录下，或者将其所在文件夹添加到系统环境变量中\n\n",
-            "ffmpeg.exe 下载地址: https://www.gyan.dev/ffmpeg/builds/\n\n",
+            "请提供至少一个文件或文件夹路径作为参数\n",
+            "本软件用于给视频批量转码，请把视频文件或文件夹拖到本软件图标上即可，支持多个一起拖拽\n",
+            "本软件依赖 ffmpeg，需确保 ffmpeg.exe 位于本程序同一目录下，或者将其所在文件夹添加到系统环境变量中\n",
+            "ffmpeg.exe 下载地址: https://www.gyan.dev/ffmpeg/builds/\n",
             "本软件开源免费，源码地址: https://github.com/JARK006/ffmpegConvert"
         ));
-        sleep(Duration::from_secs(600)); // 10分钟后自动关闭
+        println!("\n按Enter键退出程序...");
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input).unwrap();
         std::process::exit(1);
     }
 
@@ -227,18 +255,19 @@ fn main() {
                 .file_stem()
                 .and_then(|s| s.to_str())
                 .unwrap_or(default_output_name.as_str());
+
+            let file_stem = file_stem.replace("_H264", "")
+                    .replace("_h264", "")
+                    .replace("_H265", "")
+                    .replace("_h265", "");
+
             let new_file_name = format!(
                 "{}{}.mp4",
                 file_stem,
                 convert_params[(select_index - 1) as usize].subfix
             );
-            p.set_file_name(
-                new_file_name
-                    .replace("_H264", "")
-                    .replace("_h264", "")
-                    .replace("_H265", "")
-                    .replace("_h265", ""),
-            );
+            
+            p.set_file_name(new_file_name);
             p
         };
 
@@ -290,12 +319,12 @@ fn transcode_with_progress(
         for i in 0..30 {
             wait_cnt += 1;
             print!(
-                "\r检测到有其他 ffmpeg 进程正在运行，等待 {} 秒后重试... 已等待 {} 秒",
+                "\r检测到有其他 ffmpeg 进程正在运行，等待 {:2} 秒后重试... 已等待 {:2} 秒",
                 30 - i,
                 wait_cnt
             );
             std::io::stdout().flush().unwrap();
-            sleep(time::Duration::from_secs(1));
+            sleep(Duration::from_secs(1));
         }
     }
 
@@ -509,57 +538,19 @@ fn transcode_with_progress(
                 ));
 
                 println!(
-                    "    {} -> {} ({:.1}%)",
+                    "    {} -> {} {}",
                     format_size(input_size),
                     format_size(output_size),
-                    {
-                        // 包装一个带有 Drop 的临时值，保证在 println 完成后恢复控制台颜色
-                        struct ColorF64 {
-                            val: f64,
-                            handle: HANDLE,
-                        }
-                        impl fmt::Display for ColorF64 {
-                            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                                // 保证以一位小数输出（与原来 {:.1} 一致）
-                                write!(f, "{:.1}", self.val)
-                            }
-                        }
-                        impl Drop for ColorF64 {
-                            fn drop(&mut self) {
-                                unsafe {
-                                    // 恢复默认颜色（白色）
-                                    let _ = winapi::um::wincon::SetConsoleTextAttribute(
-                                        self.handle,
-                                        0x07,
-                                    );
-                                }
-                            }
-                        }
-
-                        let attr: u16 = if reduction > 0.0 {
-                            0x0C // 明亮红色 (FOREGROUND_RED | FOREGROUND_INTENSITY)
+                    color_text(
+                        &format!("({:.1}%)", reduction),
+                        if reduction > 0.0 {
+                            Color::Red
                         } else if reduction < -20.0 {
-                            0x0A // 明亮绿色 (FOREGROUND_GREEN | FOREGROUND_INTENSITY)
-                        } else if reduction < 0.0 {
-                            0x09 // 蓝色 (FOREGROUND_BLUE | FOREGROUND_INTENSITY)
+                            Color::Green
                         } else {
-                            0x07 // 默认
-                        };
-
-                        let h: HANDLE = unsafe {
-                            winapi::um::processenv::GetStdHandle(
-                                winapi::um::winbase::STD_OUTPUT_HANDLE,
-                            )
-                        };
-                        unsafe {
-                            let _ = winapi::um::wincon::SetConsoleTextAttribute(h, attr);
+                            Color::Blue
                         }
-
-                        ColorF64 {
-                            val: reduction,
-                            handle: h,
-                        }
-                    }
+                    )
                 );
             }
         }
@@ -635,7 +626,7 @@ fn parse_progress(line: &str) -> Option<ProgressInfo> {
     if let Some(time) = time {
         Some(ProgressInfo {
             current_time: time,
-            speed_str: speed_str,
+            speed_str,
         })
     } else {
         None
