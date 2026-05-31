@@ -135,9 +135,14 @@ fn main() {
             description: "H265 (hevc_amf)  AMD GPU硬件加速编码, 速度快",
         },
         ConvertParameter {
-            params: "-c:a libopus -b:a 128k -c:v libsvtav1 -crf 28 -preset 4",
+            params: "-c:a libopus -b:a 128k -c:v libsvtav1 -crf 25 -preset 6 -svtav1-params tune=0 -pix_fmt yuv420p10le",
             subfix: "_AV1",
-            description: "AV1  (libsvtav1) CPU编码, 非常慢",
+            description: "AV1  (libsvtav1) CPU编码, 较慢, 动画/游戏/屏幕录制",
+        },
+        ConvertParameter {
+            params: "-c:a libopus -b:a 128k -c:v libsvtav1 -crf 25 -preset 6 -svtav1-params tune=0:film-grain=8 -pix_fmt yuv420p10le",
+            subfix: "_AV1",
+            description: "AV1  (libsvtav1) CPU编码, 较慢, 实拍电影/剧集",
         },
         ConvertParameter {
             params: "-c:a libopus -b:a 128k -c:v libaom-av1 -crf 28 -cpu-used 8 -b:v 0 -row-mt 1",
@@ -447,14 +452,14 @@ fn transcode_with_progress(
                     );
                     std::io::stdout().flush().unwrap();
 
-                    let percen_int = percentage as i32;
-                    if percen_int != percent_int_last {
-                        percent_int_last = percen_int;
+                    let percent_int = percentage as i32;
+                    if percent_int != percent_int_last {
+                        percent_int_last = percent_int;
 
                         set_console_title(&format!(
                             "{} {}% {}",
                             title_prefix,
-                            percen_int,
+                            percent_int,
                             Path::new(input_path)
                                 .file_name()
                                 .and_then(|s| s.to_str())
