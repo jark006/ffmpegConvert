@@ -2,25 +2,17 @@
 
 ### 使用 ffmpeg 给视频批量转码
 
-需下载 **ffmpeg** ( [https://www.gyan.dev/ffmpeg/builds/](https://www.gyan.dev/ffmpeg/builds/) )，然后配置系统变量Path，或者将 `ffmpeg.exe` 直接放到本程序同一目录中。
+需下载 **ffmpeg** ( [https://www.gyan.dev/ffmpeg/builds/](https://www.gyan.dev/ffmpeg/builds/) )，然后配置系统变量Path，或者将 `ffmpeg.exe` 直接放到本程序同一目录中。若使用 NVIDIA NVENC 预置，需确保 ffmpeg 支持 `hevc_nvenc` / `av1_nvenc`，并已安装可用的 NVIDIA 驱动。
 
 内置可选的的转码目标
 
 1. H265 (libx265)    CPU编码, 编码速度较慢
 2. H265 (hevc_amf)   AMD GPU硬件加速编码, 编码速度快，但画质一般
-3. AV1  (libsvtav1)  CPU编码, 速度较慢, 适合 动画/游戏/屏幕录制
-4. AV1  (libsvtav1)  CPU编码, 速度较慢, 适合 实拍电影/剧集 (film-grain 合成颗粒)
-5. AV1  (libaom-av1) CPU编码, 编码速度最慢，压缩率最高
-
-### 实际命令行参数
-
-```sh
-ffmpeg -hide_banner -i "input.mp4" -c:a libopus -b:a 128k -c:v libx265 -crf 23 -preset slow -y "output_H265.mp4"
-ffmpeg -hide_banner -i "input.mp4" -c:a libopus -b:a 128k -c:v hevc_amf -quality quality -rc cqp -qp_i 22 -qp_p 22 -y "output_H265.mp4"
-ffmpeg -hide_banner -i "input.mp4" -c:a libopus -b:a 128k -c:v libsvtav1 -crf 25 -preset 6 -svtav1-params tune=0 -pix_fmt yuv420p10le -y "output_AV1.mp4"
-ffmpeg -hide_banner -i "input.mp4" -c:a libopus -b:a 128k -c:v libsvtav1 -crf 25 -preset 6 -svtav1-params tune=0:film-grain=8 -pix_fmt yuv420p10le -y "output_AV1.mp4"
-ffmpeg -hide_banner -i "input.mp4" -c:a libopus -b:a 128k -c:v libaom-av1 -crf 28 -cpu-used 8 -b:v 0 -row-mt 1 -y "output_AV1.mp4"
-```
+3. H265 (hevc_nvenc) NVIDIA GPU硬件加速编码, 存储优化, 适合 RTX 50系
+4. AV1  (av1_nvenc)  NVIDIA GPU硬件加速编码, 存储优化, 适合 RTX 50系
+5. AV1  (libsvtav1)  CPU编码, 速度较慢, 适合 动画/游戏/屏幕录制
+6. AV1  (libsvtav1)  CPU编码, 速度较慢, 适合 实拍电影/剧集 (film-grain 合成颗粒)
+7. AV1  (libaom-av1) CPU编码, 编码速度最慢，压缩率最高
 
 ### 自定义转码参数
 

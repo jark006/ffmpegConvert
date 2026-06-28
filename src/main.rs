@@ -8,7 +8,6 @@ use std::thread::sleep;
 use std::time::Duration;
 use winapi::um::wincon::SetConsoleTitleW;
 
-
 pub enum Color {
     Red,
     Green,
@@ -106,6 +105,46 @@ fn load_params_from_sidecar(convert_params: &mut Vec<ConvertParameter>) {
     }
 }
 
+fn default_convert_params() -> Vec<ConvertParameter> {
+    vec![
+        ConvertParameter {
+            params: "-c:a libopus -b:a 128k -c:v libx265 -crf 23 -preset slow",
+            subfix: "_H265",
+            description: "H265 (libx265)   CPU编码, 较慢",
+        },
+        ConvertParameter {
+            params: "-c:a libopus -b:a 128k -c:v hevc_amf -quality quality -rc cqp -qp_i 22 -qp_p 22",
+            subfix: "_H265",
+            description: "H265 (hevc_amf)  AMD GPU硬件加速编码, 速度快",
+        },
+        ConvertParameter {
+            params: "-c:a libopus -b:a 128k -c:v hevc_nvenc -preset p7 -tune uhq -profile:v main10 -pix_fmt p010le -rc vbr -cq 27 -b:v 0 -multipass fullres -rc-lookahead 32 -spatial-aq 1 -temporal-aq 1 -aq-strength 8 -b_ref_mode middle -nonref_p 1",
+            subfix: "_H265",
+            description: "H265 (hevc_nvenc) NVIDIA GPU硬件加速编码, 存储优化",
+        },
+        ConvertParameter {
+            params: "-c:a libopus -b:a 128k -c:v av1_nvenc -preset p7 -tune uhq -pix_fmt p010le -rc vbr -cq 30 -b:v 0 -multipass fullres -rc-lookahead 32 -spatial-aq 1 -temporal-aq 1 -aq-strength 8 -b_ref_mode middle -nonref_p 1",
+            subfix: "_AV1",
+            description: "AV1  (av1_nvenc) NVIDIA GPU硬件加速编码, 存储优化",
+        },
+        ConvertParameter {
+            params: "-c:a libopus -b:a 128k -c:v libsvtav1 -crf 25 -preset 6 -svtav1-params tune=0 -pix_fmt yuv420p10le",
+            subfix: "_AV1",
+            description: "AV1  (libsvtav1) CPU编码, 较慢, 动画/游戏/屏幕录制",
+        },
+        ConvertParameter {
+            params: "-c:a libopus -b:a 128k -c:v libsvtav1 -crf 25 -preset 6 -svtav1-params tune=0:film-grain=8 -pix_fmt yuv420p10le",
+            subfix: "_AV1",
+            description: "AV1  (libsvtav1) CPU编码, 较慢, 实拍电影/剧集",
+        },
+        ConvertParameter {
+            params: "-c:a libopus -b:a 128k -c:v libaom-av1 -crf 28 -cpu-used 8 -b:v 0 -row-mt 1",
+            subfix: "_AV1",
+            description: "AV1  (libaom-av1) CPU编码, 最慢",
+        },
+    ]
+}
+
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
 
@@ -123,33 +162,7 @@ fn main() {
         std::process::exit(1);
     }
 
-    let mut convert_params: Vec<ConvertParameter> = vec![
-        ConvertParameter {
-            params: "-c:a libopus -b:a 128k -c:v libx265 -crf 23 -preset slow",
-            subfix: "_H265",
-            description: "H265 (libx265)   CPU编码, 较慢",
-        },
-        ConvertParameter {
-            params: "-c:a libopus -b:a 128k -c:v hevc_amf -quality quality -rc cqp -qp_i 22 -qp_p 22",
-            subfix: "_H265",
-            description: "H265 (hevc_amf)  AMD GPU硬件加速编码, 速度快",
-        },
-        ConvertParameter {
-            params: "-c:a libopus -b:a 128k -c:v libsvtav1 -crf 25 -preset 6 -svtav1-params tune=0 -pix_fmt yuv420p10le",
-            subfix: "_AV1",
-            description: "AV1  (libsvtav1) CPU编码, 较慢, 动画/游戏/屏幕录制",
-        },
-        ConvertParameter {
-            params: "-c:a libopus -b:a 128k -c:v libsvtav1 -crf 25 -preset 6 -svtav1-params tune=0:film-grain=8 -pix_fmt yuv420p10le",
-            subfix: "_AV1",
-            description: "AV1  (libsvtav1) CPU编码, 较慢, 实拍电影/剧集",
-        },
-        ConvertParameter {
-            params: "-c:a libopus -b:a 128k -c:v libaom-av1 -crf 28 -cpu-used 8 -b:v 0 -row-mt 1",
-            subfix: "_AV1",
-            description: "AV1  (libaom-av1) CPU编码, 最慢",
-        },
-    ];
+    let mut convert_params = default_convert_params();
 
     load_params_from_sidecar(&mut convert_params);
 
@@ -234,11 +247,7 @@ fn main() {
 
     let mut idx = 1;
     for video_path in video_files.iter() {
-        println!(
-            "{:<2}: {}",
-            idx,
-            video_path.to_string_lossy()[4..].to_string()
-        );
+        println!("{:<2}: {}", idx, &video_path.to_string_lossy()[4..]);
         idx += 1;
     }
     println!();
@@ -261,17 +270,18 @@ fn main() {
                 .and_then(|s| s.to_str())
                 .unwrap_or(default_output_name.as_str());
 
-            let file_stem = file_stem.replace("_H264", "")
-                    .replace("_h264", "")
-                    .replace("_H265", "")
-                    .replace("_h265", "");
+            let file_stem = file_stem
+                .replace("_H264", "")
+                .replace("_h264", "")
+                .replace("_H265", "")
+                .replace("_h265", "");
 
             let new_file_name = format!(
                 "{}{}.mp4",
                 file_stem,
                 convert_params[(select_index - 1) as usize].subfix
             );
-            
+
             p.set_file_name(new_file_name);
             p
         };
@@ -279,7 +289,7 @@ fn main() {
         // 执行转码并显示进度
         if !transcode_with_progress(
             &convert_params[(select_index - 1) as usize],
-            &video_path,
+            video_path,
             &output_path,
             &format!("[{}/{}]", file_count, total_files),
         ) {
@@ -298,7 +308,9 @@ fn main() {
             .arg("-t")
             .arg("30")
             .spawn()
-            .expect("无法计划关机");
+            .expect("无法计划关机")
+            .wait()
+            .expect("无法等待关机命令");
     }
 }
 
@@ -351,10 +363,10 @@ fn transcode_with_progress(
     let mut child = match Command::new("ffmpeg.exe")
         .arg("-hide_banner")
         .arg("-i")
-        .arg(&input_path)
+        .arg(input_path)
         .args(convert_params.params.split_whitespace())
         .arg("-y") // 覆盖输出文件
-        .arg(&output_path)
+        .arg(output_path)
         .stderr(Stdio::piped())
         .stdout(Stdio::null())
         .stdin(Stdio::null())
@@ -381,95 +393,90 @@ fn transcode_with_progress(
 
     let mut percent_int_last = -1;
 
-    for byte in reader.bytes() {
-        if let Ok(b) = byte {
-            let ch = b as char;
-
-            if ch != '\r' && ch != '\n' {
-                buffer.push(ch);
-                continue;
-            }
-
-            if buffer.is_empty() {
-                continue;
-            }
-
-            // 解析总时长
-            if total_duration.is_none() {
-                if let Some(duration) = parse_total_duration(&buffer) {
-                    total_duration = Some(duration);
-                }
-            }
-
-            // 解析进度信息
-            if let Some(total) = total_duration {
-                if let Some(progress) = parse_progress(&buffer) {
-                    let percentage: f64 = if total.as_millis() > 0 {
-                        if progress.current_time == total {
-                            100.0
-                        } else {
-                            ((progress.current_time.as_millis() as f64) * 100.0)
-                                / (total.as_millis() as f64)
-                        }
-                    } else {
-                        0.0
-                    };
-
-                    let elapsed_millis =
-                        (std::time::Instant::now() - start_timestamp).as_millis() as u64;
-
-                    //根据已用时间和百分比计算估计剩余时间
-                    let estimated_remaining_millis = if elapsed_millis < 1000 {
-                        total.as_millis() as u64
-                    } else if percentage > 0.0 && percentage < 100.0 {
-                        let remain_millis =
-                            (100.0 - percentage) * (elapsed_millis as f64) / percentage;
-                        remain_millis as u64
-                    } else if percentage == 100.0 {
-                        0
-                    } else {
-                        total.as_millis() as u64
-                    };
-
-                    let remain_str = if estimated_remaining_millis > 0 {
-                        format!(
-                            "剩余:{}",
-                            format_duration(&Duration::from_millis(estimated_remaining_millis))
-                        )
-                    } else {
-                        "已完成                ".to_string()
-                    };
-
-                    // 在同一行更新进度
-                    print!(
-                        "\r    [{:3.1}%] {} / {} 速度:{} 用时:{} {}   ",
-                        percentage,
-                        format_duration(&progress.current_time),
-                        format_duration(&total),
-                        progress.speed_str,
-                        format_duration(&Duration::from_millis(elapsed_millis)),
-                        remain_str
-                    );
-                    std::io::stdout().flush().unwrap();
-
-                    let percent_int = percentage as i32;
-                    if percent_int != percent_int_last {
-                        percent_int_last = percent_int;
-
-                        set_console_title(&format!(
-                            "{} {}% {}",
-                            title_prefix,
-                            percent_int,
-                            Path::new(input_path)
-                                .file_name()
-                                .and_then(|s| s.to_str())
-                                .unwrap_or(input_path)
-                        ));
-                    }
-                }
-            }
-            buffer.clear();
+    for b in reader.bytes().flatten() {
+        let ch = b as char;
+        if ch != '\r' && ch != '\n' {
+            buffer.push(ch);
+            continue;
         }
+
+        if buffer.is_empty() {
+            continue;
+        }
+
+        // 解析总时长
+        if total_duration.is_none()
+            && let Some(duration) = parse_total_duration(&buffer)
+        {
+            total_duration = Some(duration);
+        }
+
+        // 解析进度信息
+        if let Some(total) = total_duration
+            && let Some(progress) = parse_progress(&buffer)
+        {
+            let percentage: f64 = if total.as_millis() > 0 {
+                if progress.current_time == total {
+                    100.0
+                } else {
+                    ((progress.current_time.as_millis() as f64) * 100.0)
+                        / (total.as_millis() as f64)
+                }
+            } else {
+                0.0
+            };
+
+            let elapsed_millis = (std::time::Instant::now() - start_timestamp).as_millis() as u64;
+
+            //根据已用时间和百分比计算估计剩余时间
+            let estimated_remaining_millis = if elapsed_millis < 1000 {
+                total.as_millis() as u64
+            } else if percentage > 0.0 && percentage < 100.0 {
+                let remain_millis = (100.0 - percentage) * (elapsed_millis as f64) / percentage;
+                remain_millis as u64
+            } else if percentage == 100.0 {
+                0
+            } else {
+                total.as_millis() as u64
+            };
+
+            let remain_str = if estimated_remaining_millis > 0 {
+                format!(
+                    "剩余:{}",
+                    format_duration(&Duration::from_millis(estimated_remaining_millis))
+                )
+            } else {
+                "已完成                ".to_string()
+            };
+
+            // 在同一行更新进度
+            print!(
+                "\r    [{:3.1}%] {} / {} 速度:{} 用时:{} {}   ",
+                percentage,
+                format_duration(&progress.current_time),
+                format_duration(&total),
+                progress.speed_str,
+                format_duration(&Duration::from_millis(elapsed_millis)),
+                remain_str
+            );
+            std::io::stdout().flush().unwrap();
+
+            let percent_int = percentage as i32;
+            if percent_int != percent_int_last {
+                percent_int_last = percent_int;
+
+                set_console_title(&format!(
+                    "{} {}% {}",
+                    title_prefix,
+                    percent_int,
+                    Path::new(input_path)
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or(input_path)
+                ));
+            }
+        }
+        buffer.clear();
     }
 
     let status = child.wait().expect("子进程执行失败");
@@ -512,52 +519,52 @@ fn transcode_with_progress(
         }
 
         // 再输出文件体积对比，例如: 795.46 MB -> 389.43 MB (-51%)
-        if let Ok(input_metadata) = std::fs::metadata(input_path) {
-            if let Ok(output_metadata) = std::fs::metadata(output_path) {
-                let input_size = input_metadata.len() as f64;
-                let output_size = output_metadata.len() as f64;
-                let reduction = if input_size > 0.0 {
-                    100.0 * (output_size - input_size) / input_size
+        if let Ok(input_metadata) = std::fs::metadata(input_path)
+            && let Ok(output_metadata) = std::fs::metadata(output_path)
+        {
+            let input_size = input_metadata.len() as f64;
+            let output_size = output_metadata.len() as f64;
+            let reduction = if input_size > 0.0 {
+                100.0 * (output_size - input_size) / input_size
+            } else {
+                0.0
+            };
+
+            fn format_size(size: f64) -> String {
+                if size >= 1_073_741_824.0 {
+                    format!("{:.2} GB", size / 1_073_741_824.0)
+                } else if size >= 1_048_576.0 {
+                    format!("{:.2} MB", size / 1_048_576.0)
+                } else if size >= 1024.0 {
+                    format!("{:.2} KB", size / 1024.0)
                 } else {
-                    0.0
-                };
-
-                fn format_size(size: f64) -> String {
-                    if size >= 1_073_741_824.0 {
-                        format!("{:.2} GB", size / 1_073_741_824.0)
-                    } else if size >= 1_048_576.0 {
-                        format!("{:.2} MB", size / 1_048_576.0)
-                    } else if size >= 1024.0 {
-                        format!("{:.2} KB", size / 1024.0)
-                    } else {
-                        format!("{:.2} B", size)
-                    }
+                    format!("{:.2} B", size)
                 }
-                println!();
-
-                log_content.push_str(&format!(
-                    "{} -> {} ({:.1}%)",
-                    format_size(input_size),
-                    format_size(output_size),
-                    reduction
-                ));
-
-                println!(
-                    "    {} -> {} {}",
-                    format_size(input_size),
-                    format_size(output_size),
-                    color_text(
-                        &format!("({:.1}%)", reduction),
-                        if reduction > 0.0 {
-                            Color::Red
-                        } else if reduction < -20.0 {
-                            Color::Green
-                        } else {
-                            Color::Blue
-                        }
-                    )
-                );
             }
+            println!();
+
+            log_content.push_str(&format!(
+                "{} -> {} ({:.1}%)",
+                format_size(input_size),
+                format_size(output_size),
+                reduction
+            ));
+
+            println!(
+                "    {} -> {} {}",
+                format_size(input_size),
+                format_size(output_size),
+                color_text(
+                    &format!("({:.1}%)", reduction),
+                    if reduction > 0.0 {
+                        Color::Red
+                    } else if reduction < -20.0 {
+                        Color::Green
+                    } else {
+                        Color::Blue
+                    }
+                )
+            );
         }
 
         std::io::stdout().flush().unwrap();
@@ -628,14 +635,10 @@ fn parse_progress(line: &str) -> Option<ProgressInfo> {
         speed_str
     };
 
-    if let Some(time) = time {
-        Some(ProgressInfo {
-            current_time: time,
-            speed_str,
-        })
-    } else {
-        None
-    }
+    time.map(|time| ProgressInfo {
+        current_time: time,
+        speed_str,
+    })
 }
 
 fn parse_time_to_duration(time_str: &str) -> Option<Duration> {
@@ -676,11 +679,35 @@ fn find_video_files(dir: &Path, exts: &[&str], results: &mut Vec<PathBuf>) {
             let path = entry.path();
             if path.is_dir() {
                 find_video_files(&path, exts, results);
-            } else if is_video_file(&path, exts) {
-                if let Ok(absolute_path) = path.canonicalize() {
-                    results.push(absolute_path);
-                }
+            } else if is_video_file(&path, exts)
+                && let Ok(absolute_path) = path.canonicalize()
+            {
+                results.push(absolute_path);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_params_include_nvidia_hevc_and_av1_presets() {
+        let params = default_convert_params();
+
+        assert!(params.iter().any(|p| {
+            p.params
+                == "-c:a libopus -b:a 128k -c:v hevc_nvenc -preset p7 -tune uhq -profile:v main10 -pix_fmt p010le -rc vbr -cq 27 -b:v 0 -multipass fullres -rc-lookahead 32 -spatial-aq 1 -temporal-aq 1 -aq-strength 8 -b_ref_mode middle -nonref_p 1"
+                && p.subfix == "_H265"
+                && p.description == "H265 (hevc_nvenc) NVIDIA GPU硬件加速编码, 存储优化"
+        }));
+
+        assert!(params.iter().any(|p| {
+            p.params
+                == "-c:a libopus -b:a 128k -c:v av1_nvenc -preset p7 -tune uhq -pix_fmt p010le -rc vbr -cq 30 -b:v 0 -multipass fullres -rc-lookahead 32 -spatial-aq 1 -temporal-aq 1 -aq-strength 8 -b_ref_mode middle -nonref_p 1"
+                && p.subfix == "_AV1"
+                && p.description == "AV1  (av1_nvenc) NVIDIA GPU硬件加速编码, 存储优化"
+        }));
     }
 }
