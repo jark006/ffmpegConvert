@@ -128,6 +128,11 @@ fn default_convert_params() -> Vec<ConvertParameter> {
             description: "AV1  (av1_nvenc) NVIDIA GPU硬件加速编码, 存储优化",
         },
         ConvertParameter {
+            params: "-c:a libopus -b:a 128k -c:v av1_nvenc -preset p5 -tune hq -pix_fmt yuv420p -rc vbr -cq 32 -b:v 0 -multipass qres -rc-lookahead 8 -spatial-aq 1 -temporal-aq 0 -aq-strength 5 -b_ref_mode middle -nonref_p 1",
+            subfix: "_AV1",
+            description: "AV1  (av1_nvenc) NVIDIA GPU硬件加速编码, 快速存储优化",
+        },
+        ConvertParameter {
             params: "-c:a libopus -b:a 128k -c:v libsvtav1 -crf 25 -preset 6 -svtav1-params tune=0 -pix_fmt yuv420p10le",
             subfix: "_AV1",
             description: "AV1  (libsvtav1) CPU编码, 较慢, 动画/游戏/屏幕录制",
@@ -136,11 +141,6 @@ fn default_convert_params() -> Vec<ConvertParameter> {
             params: "-c:a libopus -b:a 128k -c:v libsvtav1 -crf 25 -preset 6 -svtav1-params tune=0:film-grain=8 -pix_fmt yuv420p10le",
             subfix: "_AV1",
             description: "AV1  (libsvtav1) CPU编码, 较慢, 实拍电影/剧集",
-        },
-        ConvertParameter {
-            params: "-c:a libopus -b:a 128k -c:v libaom-av1 -crf 28 -cpu-used 8 -b:v 0 -row-mt 1",
-            subfix: "_AV1",
-            description: "AV1  (libaom-av1) CPU编码, 最慢",
         },
     ]
 }
@@ -708,6 +708,17 @@ mod tests {
                 == "-c:a libopus -b:a 128k -c:v av1_nvenc -preset p7 -tune uhq -pix_fmt p010le -rc vbr -cq 30 -b:v 0 -multipass fullres -rc-lookahead 32 -spatial-aq 1 -temporal-aq 1 -aq-strength 8 -b_ref_mode middle -nonref_p 1"
                 && p.subfix == "_AV1"
                 && p.description == "AV1  (av1_nvenc) NVIDIA GPU硬件加速编码, 存储优化"
+        }));
+    }
+    #[test]
+    fn default_params_include_fast_av1_nvenc_storage_preset() {
+        let params = default_convert_params();
+
+        assert!(params.iter().any(|p| {
+            p.params
+                == "-c:a libopus -b:a 128k -c:v av1_nvenc -preset p5 -tune hq -pix_fmt yuv420p -rc vbr -cq 32 -b:v 0 -multipass qres -rc-lookahead 8 -spatial-aq 1 -temporal-aq 0 -aq-strength 5 -b_ref_mode middle -nonref_p 1"
+                && p.subfix == "_AV1"
+                && p.description == "AV1  (av1_nvenc) NVIDIA GPU硬件加速编码, 快速存储优化"
         }));
     }
 }

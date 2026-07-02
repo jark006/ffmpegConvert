@@ -10,9 +10,9 @@
 2. H265 (hevc_amf)   AMD GPU硬件加速编码, 编码速度快，但画质一般
 3. H265 (hevc_nvenc) NVIDIA GPU硬件加速编码, 存储优化, 适合 RTX 50系
 4. AV1  (av1_nvenc)  NVIDIA GPU硬件加速编码, 存储优化, 适合 RTX 50系
-5. AV1  (libsvtav1)  CPU编码, 速度较慢, 适合 动画/游戏/屏幕录制
-6. AV1  (libsvtav1)  CPU编码, 速度较慢, 适合 实拍电影/剧集 (film-grain 合成颗粒)
-7. AV1  (libaom-av1) CPU编码, 编码速度最慢，压缩率最高
+5. AV1  (av1_nvenc)  NVIDIA GPU硬件加速编码, 快速存储优化
+6. AV1  (libsvtav1)  CPU编码, 速度较慢, 适合 动画/游戏/屏幕录制
+7. AV1  (libsvtav1)  CPU编码, 速度较慢, 适合 实拍电影/剧集 (film-grain 合成颗粒)
 
 ### 自定义转码参数
 
